@@ -318,6 +318,19 @@ def meza_command_backup (argv):
 
 	sys.exit(rc)
 
+def meza_command_legacyimport (argv):
+	env = argv[0]
+
+	rc = check_environment(env)
+	if rc != 0:
+		sys.exit(rc)
+
+	shell_cmd = playbook_cmd( 'legacyimport', env ) + argv[1:]
+
+	rc = meza_shell_exec( shell_cmd )
+
+	sys.exit(rc)
+
 
 def meza_command_destroy (argv):
 	print "command not yet built"

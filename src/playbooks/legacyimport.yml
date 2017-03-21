@@ -1,0 +1,192 @@
+---
+# Transfer data from legacy remote without a backups server defined
+# sudo -u meza-ansible ansible-playbook /opt/meza/src/playbooks/import.yml -i /opt/meza/config/local-secret/monolith/hosts --extra-vars '{"env":"monolith"}'
+
+
+#
+# First play is just to setup fact "wikis" on all relevant hosts
+#
+- hosts: app-servers, db-master
+  become: yes
+  roles:
+  - set-vars
+
+  tasks:
+  - name: Get individual wikis dirs
+    find:
+      paths: "{{ m_local_public }}/wikis/"
+      file_type: directory
+    register: wikis_dirs
+    delegate_to: localhost
+
+  - name: Set fact "wikis" on all relevant hosts
+    set_fact:
+      wikis: "{{ wikis_dirs.files | map(attribute='path') | map('basename') | list }}"
+
+
+#
+# Rsync uploads from legacy_remote to app servers
+#
+- hosts: app-servers
+  become: yes
+  roles:
+  - set-vars
+
+  tasks:
+
+  - name: Ensure uploads dir configured for each wiki
+    file:
+      path: "{{ m_uploads_dir }}/{{ item }}"
+      state: directory
+      mode: 0775
+      owner: apache
+      group: apache
+      recurse: yes
+    with_items: "{{ wikis }}"
+
+  # FIXME: This should be written into meza-deploy
+  - name: Ensure user meza-ansible is in group apache
+    user:
+      name: meza-ansible
+      # add onto groups
+      groups: apache
+      append: yes
+
+  - name: rsync each wiki uploads dir
+    shell: >
+      rsync -vHOrltDe
+      ssh "meza-ansible@{{ legacy_remote.host }}:/opt/meza/htdocs/wikis/{{ item }}/images/"
+      "/opt/meza/data/uploads/{{ item }}/"
+
+    become: true
+    become_user: meza-ansible
+    # runs on app-servers via hosts defined above
+    # delegate_to: "{{ groups['app-servers'] }}"
+    with_items: "{{ wikis }}"
+
+  # in case rsync brings in anything that's not apache:apache
+  - name: Ensure any changes to uploads dir properly configured
+    file:
+      path: "{{ m_uploads_dir }}"
+      state: directory
+      mode: 0775
+      owner: apache
+      group: apache
+      recurse: yes
+
+
+
+  # - name: rsync each wiki uploads dir
+  #   synchronize:
+  #     mode: pull
+  #     src: rsync://{{ legacy_remote.host }}/opt/meza/htdocs/wikis/{{ item }}/images/
+  #     dest: /opt/meza/data/uploads/{{ item }}/
+
+  #     # preserve permissions
+  #     perms: yes
+
+  #     # recurse into directories
+  #     recursive: yes
+
+  #     # setup meza-ansible on remote
+  #     set_remote_user: no
+
+  #   # runs on app-servers via hosts defined above
+  #   # delegate_to: "{{ groups['app-servers'] }}"
+  #   with_items: "{{ wikis_dirs.files | map(attribute='path') | map('basename') | list }}"
+
+
+
+
+
+
+#
+# Dump SQL files from legacy_remote onto db-master, import
+#
+- hosts: db-master
+  become: yes
+  roles:
+  - set-vars
+
+  tasks:
+  - name: Remove SQL files
+    file:
+      state: absent
+      path: "/tmp/legacy_remote_{{ item }}.sql"
+    with_items: "{{ wikis }}"
+
+  - name: Get database dumps for each wiki onto new DB master
+    shell: >
+      ssh meza-ansible@{{ legacy_remote.host }}
+      mysqldump -u {{ legacy_remote.db_user }}
+      --password={{ legacy_remote.db_pass }}
+      wiki_{{ item }} > /tmp/legacy_remote_{{ item }}.sql
+    become: true
+    become_user: meza-ansible
+    with_items: "{{ wikis }}"
+
+  - name: DROP all wiki databases
+    mysql_db:
+      state: absent
+      name: "wiki_{{ item }}"
+    with_items: "{{ wikis }}"
+
+  - name: Recreate all DBs
+    mysql_db:
+      state: import
+      name: "wiki_{{ item }}"
+      target: "/tmp/legacy_remote_{{ item }}.sql"
+    with_items: "{{ wikis }}"
+
+  - name: Remove SQL files
+    file:
+      state: absent
+      path: "/tmp/legacy_remote_{{ item }}.sql"
+    with_items: "{{ wikis }}"
+
+
+- hosts: app-servers
+  become: true
+  roles:
+    - set-vars
+
+  tasks:
+
+  - name: Update database
+    include_role:
+      name: update.php
+    vars:
+      wiki_id: "{{ item }}"
+    with_items: "{{ wikis }}"
+
+  # FIXME: All of the items below were copy-pasted from init-wiki.yml, but I'm
+  #        not sure at this time what the best way to abstract them is.
+
+  - name: rebuildrecentchanges.php
+    shell: >
+      WIKI="{{ item }}" php "{{ m_mediawiki }}/maintenance/rebuildrecentchanges.php"
+    run_once: true
+    with_items: "{{ wikis }}"
+
+  - name: Run SMW's rebuildData.php
+    shell: >
+      WIKI="{{ item }}" php "{{ m_mediawiki }}/extensions/SemanticMediaWiki/maintenance/rebuildData.php"
+      -d 5 -v --ignore-exceptions --exception-log="{{ m_meza }}/logs/rebuilddata-exceptions-{{ item }}-.log"
+    run_once: true
+    with_items: "{{ wikis }}"
+
+  - name: Run runJobs.php
+    shell: >
+      WIKI="{{ item }}" php "{{ m_mediawiki }}/maintenance/runJobs.php" --quick
+    run_once: true
+    with_items: "{{ wikis }}"
+
+  # Generate ES index, since it is skipped in the initial create-wiki.sh
+  # Ref: https://git.wikimedia.org/blob/mediawiki%2Fextensions%2FCirrusSearch.git/REL1_25/README
+  - name: Running elastic-build-index.sh for demo wiki
+    shell: |
+      wiki_id="{{ item }}"
+      source "/opt/meza/config/core/config.sh"
+      source "{{ m_scripts }}/elastic-build-index.sh"
+    run_once: true
+    with_items: "{{ wikis }}"
