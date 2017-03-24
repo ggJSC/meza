@@ -11,6 +11,9 @@
   roles:
   - set-vars
 
+  tags:
+  - always
+
   tasks:
   - name: Get individual wikis dirs
     find:
@@ -112,7 +115,7 @@
   - name: Remove SQL files
     file:
       state: absent
-      path: "/tmp/legacy_remote_{{ item }}.sql"
+      path: "/opt/meza/data/legacy_remote_{{ item }}.sql"
     with_items: "{{ wikis }}"
 
   - name: Get database dumps for each wiki onto new DB master
@@ -120,7 +123,7 @@
       ssh meza-ansible@{{ legacy_remote.host }}
       mysqldump -u {{ legacy_remote.db_user }}
       --password={{ legacy_remote.db_pass }}
-      wiki_{{ item }} > /tmp/legacy_remote_{{ item }}.sql
+      wiki_{{ item }} > /opt/meza/data/legacy_remote_{{ item }}.sql
     become: true
     become_user: meza-ansible
     with_items: "{{ wikis }}"
@@ -135,20 +138,22 @@
     mysql_db:
       state: import
       name: "wiki_{{ item }}"
-      target: "/tmp/legacy_remote_{{ item }}.sql"
+      target: "/opt/meza/data/legacy_remote_{{ item }}.sql"
     with_items: "{{ wikis }}"
 
   - name: Remove SQL files
     file:
       state: absent
-      path: "/tmp/legacy_remote_{{ item }}.sql"
+      path: "/opt/meza/data/legacy_remote_{{ item }}.sql"
     with_items: "{{ wikis }}"
 
 
 - hosts: app-servers
   become: true
   roles:
-    - set-vars
+  - set-vars
+  tags:
+  - db-update
 
   tasks:
 
