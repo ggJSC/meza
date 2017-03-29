@@ -227,4 +227,5 @@
     wiki_id: "{{ item }}"
   with_items: "{{ wikis_dirs.files | map(attribute='path') | map('basename') | list }}"
   run_once: true
-
+  tags:
+  - db-update
