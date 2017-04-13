@@ -128,7 +128,7 @@ for( $i = $numDays; $i < count($data[2]["values"]); $i++ ){
 }
 
 $data[] = array(
-        'key'           => "Usage Growth Rate",
+        'key'           => "Usage Growth Rate (per week)",
         'values'        => $tempratedata,
 );
 
