@@ -110,7 +110,7 @@ foreach( $variables as $varname => $varvalue ){
 }
 
 
-/*
+//*
 *
 * Add data for usage rate trend
 *
@@ -118,14 +118,25 @@ foreach( $variables as $varname => $varvalue ){
 
 $numDays = 7;
 
+$prevValue = $data[2]["values"][$numDays]["y"] - $data[2]["values"][0]["y"];
+
 for( $i = $numDays; $i < count($data[2]["values"]); $i++ ){
+        
+        $value = $data[2]["values"][$i]["y"] - $data[2]["values"][$i - $numDays]["y"];
+
+        if( $value > 0 ){ 
+                $value = $prevValue;
+        } else {
+                $prevValue = $value;
+        }
 
         $tempratedata[] = array(
                 'x'     => $data[2]["values"][$i]["x"],
-                'y'     => $data[2]["values"][$i]["y"] - $data[2]["values"][$i - $numDays]["y"],
+                'y'     => $value,
         );
 
 }
+
 
 $data[] = array(
         'key'           => "Usage Growth Rate (per week)",
