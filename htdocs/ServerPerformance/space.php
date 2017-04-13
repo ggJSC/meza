@@ -15,7 +15,7 @@ date_default_timezone_set('America/Chicago');
 if( isset($_REQUEST['days']) && $_REQUEST['days'] > 0 ){
     $daysOfData = $_REQUEST['days'];
 } else {
-    $daysOfData = 30; // default
+    $daysOfData = 360; // default
 }
 
 # ceiling value to keep outlier values from skewing y axis
@@ -30,12 +30,13 @@ $dbname = "server";
 $dbtable = "opt_space";
 
 $query = "SELECT
-            DATE_FORMAT( datetime, '%Y-%m-%d %H:%i:%s' ) AS ts,
+            DATE_FORMAT( datetime, '%Y-%m-%d' ) AS ts,
             space_total,
             space_used,
             (space_total - space_used) AS space_available
         FROM $dbtable
-        WHERE DATE_FORMAT(datetime, '%Y-%m-%d') >= DATE_FORMAT(NOW(), '%Y-%m-%d') - INTERVAL $daysOfData DAY;";
+        WHERE DATE_FORMAT(datetime, '%Y-%m-%d') >= DATE_FORMAT(NOW(), '%Y-%m-%d') - INTERVAL $daysOfData DAY
+        GROUP BY ts;";
 
 $mysqli = mysqli_connect("$servername", "$username", "$password", "$dbname");
 
@@ -107,6 +108,29 @@ foreach( $variables as $varname => $varvalue ){
         'values'    => $tempdata[$varvalue],    // e.g. {"x":1384236000000,"y":0.1},{"x":1384256000000,"y":0.2},etc
     );
 }
+
+
+/*
+*
+* Add data for usage rate trend
+*
+*/
+
+$numDays = 7;
+
+for( $i = $numDays; $i < count($data[2]["values"]); $i++ ){
+
+        $tempratedata[] = array(
+                'x'     => $data[2]["values"][$i]["x"],
+                'y'     => $data[2]["values"][$i]["y"] - $data[2]["values"][$i - $numDays]["y"],
+        );
+
+}
+
+$data[] = array(
+        'key'           => "Usage Growth Rate",
+        'values'        => $tempratedata,
+);
 
 
 /*
